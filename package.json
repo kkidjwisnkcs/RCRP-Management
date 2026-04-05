@@ -1,0 +1,31 @@
+{
+  "name": "xero-rcrp-bot",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "deploy": "node src/deploy-commands.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kushwork1209-prog/RCRP-Management.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/kushwork1209-prog/RCRP-Management/issues"
+  },
+  "homepage": "https://github.com/kushwork1209-prog/RCRP-Management#readme",
+  "description": "RCRP Management — River City Role Play Management Bot. Zero-Persistence, ERLC-integrated, AI-powered.",
+  "dependencies": {
+    "@discordjs/builders": "^1.14.0",
+    "@discordjs/rest": "^2.6.1",
+    "axios": "^1.14.0",
+    "canvas": "^3.2.2",
+    "discord.js": "^14.25.1",
+    "dotenv": "^17.3.1",
+    "node-cron": "^4.2.1",
+    "openai": "^6.33.0"
+  }
+}
