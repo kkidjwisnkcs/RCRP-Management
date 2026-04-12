@@ -400,11 +400,14 @@ async function runCommandLogs(snapshot, guild) {
     for (const k of (snapshot.killLogs   || [])) {
       crimeTicker.seedSeen((k.Killer || '') + '-' + (k.Killed || '') + '-' + (k.Timestamp || ''));
     }
-    // Seed wantedWall so we don't re-announce already-wanted players on restart
+    // Seed wantedWall + pursuitTracker so neither re-announces already-wanted players on restart
     const highWanted = (snapshot.players || [])
       .filter(p => (p._wantedStars || 0) >= 3)
       .map(p => String(p._userId || p._username || ''));
-    if (highWanted.length) wantedWall.seedSeen(highWanted);
+    if (highWanted.length) {
+      wantedWall.seedSeen(highWanted);
+      pursuitTracker.seedSeen(highWanted); // ← was missing — caused pursuit spam on restart
+    }
     console.log('[Heartbeat] Live-seeded: ' + (snapshot.modCalls||[]).length + ' modCalls, ' +
       (snapshot.emergencyCalls||[]).length + ' emergencies, ' + (snapshot.killLogs||[]).length + ' kills, ' +
       highWanted.length + ' high-wanted players — restart spam fully blocked.');
