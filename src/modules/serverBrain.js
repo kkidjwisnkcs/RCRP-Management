@@ -451,7 +451,10 @@ async function learnFromMessage(msg) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// getContextForQuery — returns relevant channel content for AI queries
+// getContextForQuery — keyword-aware extraction from full channel history
+// Rules/pinned content lives at the START (oldest). Recent chat at the END.
+// We search the ENTIRE content for each keyword and extract windows around
+// every hit, so a rule posted 2 years ago is still found and returned.
 // ─────────────────────────────────────────────────────────────────────────────
 function getContextForQuery(query) {
   if (_channelIndex.size === 0) {
@@ -460,6 +463,7 @@ function getContextForQuery(query) {
 
   const qWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
 
+  // Score every channel by keyword hits across the FULL content
   const scored = [..._channelIndex.values()].map(ch => {
     const hay   = (ch.name + ' ' + ch.content).toLowerCase();
     const score = qWords.reduce((a, w) => a + (hay.split(w).length - 1), 0);
@@ -473,11 +477,53 @@ function getContextForQuery(query) {
     : [..._channelIndex.values()].filter(c => /rule|info|announce|guide|faq|welcome/i.test(c.name)).slice(0, 4);
 
   if (!list.length) {
-    return [..._channelIndex.values()].slice(0, 3).map(c => `=== #${c.name} ===\n${c.content.slice(-1200)}`).join('\n\n---\n\n');
+    return [..._channelIndex.values()].slice(0, 3).map(c => `=== #${c.name} ===\n${_extractRelevant(c.content, qWords, 1200)}`).join('\n\n---\n\n');
   }
 
-  // Return the MOST RECENT content (tail) for each matched channel — most relevant
-  return list.map(c => `=== #${c.name} ===\n${c.content.slice(-1500)}`).join('\n\n---\n\n');
+  return list.map(c => `=== #${c.name} ===\n${_extractRelevant(c.content, qWords, 2000)}`).join('\n\n---\n\n');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _extractRelevant — finds keyword matches ANYWHERE in content and returns
+// windows around them, plus always includes the recent tail.
+// This means rules/pins from years ago are found even in a 500k-char index.
+// ─────────────────────────────────────────────────────────────────────────────
+function _extractRelevant(content, qWords, maxLen) {
+  const lower    = content.toLowerCase();
+  const windows  = new Set();
+
+  for (const word of qWords) {
+    let idx = 0;
+    while (true) {
+      const pos = lower.indexOf(word, idx);
+      if (pos === -1) break;
+      // Snap to nearest line boundary for cleaner extraction
+      const lineStart = content.lastIndexOf('\n', Math.max(0, pos - 300));
+      const lineEnd   = content.indexOf('\n', Math.min(content.length, pos + 400));
+      const start     = lineStart === -1 ? 0 : lineStart + 1;
+      const end       = lineEnd   === -1 ? content.length : lineEnd;
+      windows.add(`${start}:${end}`);
+      idx = pos + word.length;
+      if (windows.size >= 8) break; // cap to avoid too many extracts
+    }
+  }
+
+  // Build extracted sections from windows (sorted by position)
+  const sorted = [...windows]
+    .map(w => { const [s, e] = w.split(':').map(Number); return { s, e }; })
+    .sort((a, b) => a.s - b.s);
+
+  const extracted = sorted.map(({ s, e }) => content.slice(s, e).trim()).join('\n…\n');
+
+  // Always include the recent tail (most recent messages) regardless of keyword hits
+  const tail    = content.slice(-600);
+  const hasTail = extracted.includes(tail.slice(0, 50));
+
+  const combined = extracted
+    ? (hasTail ? extracted : `${extracted}\n\n— Recent —\n${tail}`)
+    : tail;
+
+  return combined.slice(0, maxLen);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
