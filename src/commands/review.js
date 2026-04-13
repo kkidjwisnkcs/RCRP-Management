@@ -34,12 +34,12 @@ function getRoleLabel(member) {
   if (r.serverDirector  && member.roles.cache.has(r.serverDirector))  return 'Server Director';
   if (r.deputyDirector  && member.roles.cache.has(r.deputyDirector))  return 'Deputy Director';
   if (r.hr              && member.roles.cache.has(r.hr))              return 'Human Resources';
-  if (r.seniorManager   && member.roles.cache.has(r.seniorManager))   return 'Senior Manager';
-  if (r.manager         && member.roles.cache.has(r.manager))         return 'Manager';
+  if (r.headManagement   && member.roles.cache.has(r.headManagement))   return 'Head Management';
+  if (r.seniorManagement         && member.roles.cache.has(r.seniorManagement))         return 'Senior Management';
   if (r.headAdmin       && member.roles.cache.has(r.headAdmin))       return 'Head Admin';
   if (r.seniorAdmin     && member.roles.cache.has(r.seniorAdmin))     return 'Senior Admin';
   if (r.gameStaff       && member.roles.cache.has(r.gameStaff))       return 'Game Staff';
-  if (r.trialStaff      && member.roles.cache.has(r.trialStaff))      return 'Trial Game Staff';
+  if (r.trialAdmin      && member.roles.cache.has(r.trialAdmin))      return 'Trial Game Staff';
   if (r.headModerator   && member.roles.cache.has(r.headModerator))   return 'Head Moderator';
   if (r.seniorMod       && member.roles.cache.has(r.seniorMod))       return 'Senior Moderator';
   if (r.moderator       && member.roles.cache.has(r.moderator))       return 'Moderator';
