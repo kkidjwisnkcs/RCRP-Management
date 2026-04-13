@@ -1,122 +1,122 @@
-// ============================================================
-// /promote — Staff promotion command with optional image branding
-// ============================================================
+// promote.js — /promote command
+  // Grants new role, optionally removes old role, DMs the member, posts to promotion channel.
+  'use strict';
 
-const {
-  SlashCommandBuilder,
-  EmbedBuilder,
-  AttachmentBuilder,
-  PermissionFlagsBits,
-} = require('discord.js');
-const config  = require('../config');
-const perms   = require('../utils/permissions');
-const db      = require('../utils/discordDb');
+  const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+  const config = require('../config');
+  const perms  = require('../utils/permissions');
+  const db     = require('../utils/discordDb');
 
-module.exports = {
-  data: new SlashCommandBuilder()
-    .setName('promote')
-    .setDescription('Promote a staff member to a new role with a branded announcement.')
-    .addUserOption(o => o
-      .setName('member')
-      .setDescription('The staff member to promote')
-      .setRequired(true)
-    )
-    .addRoleOption(o => o
-      .setName('role')
-      .setDescription('The new role to assign')
-      .setRequired(true)
-    )
-    .addStringOption(o => o
-      .setName('note')
-      .setDescription('Optional promotion note or reason')
-      .setRequired(false)
-    )
-    .addAttachmentOption(o => o
-      .setName('image')
-      .setDescription('Optional branding image for the promotion embed')
-      .setRequired(false)
-    ),
+  module.exports = {
+    data: new SlashCommandBuilder()
+      .setName('promote')
+      .setDescription('Promote a staff member with a branded announcement.')
+      .addUserOption(o => o.setName('member').setDescription('The staff member to promote').setRequired(true))
+      .addRoleOption(o => o.setName('new_role').setDescription('The new role to grant').setRequired(true))
+      .addRoleOption(o => o.setName('old_role').setDescription('The previous role to remove').setRequired(false))
+      .addStringOption(o => o.setName('note').setDescription('Promotion note or message').setRequired(false))
+      .addAttachmentOption(o => o.setName('image').setDescription('Branded image for the promotion embed').setRequired(false)),
 
-  async execute(interaction) {
-    if (!perms.isManagement(interaction.member)) {
-      return perms.denyPermission(interaction, 'Management');
-    }
+    async execute(interaction) {
+      if (!perms.isManagement(interaction.member)) {
+        return perms.denyPermission(interaction, 'Management');
+      }
 
-    await interaction.deferReply();
+      await interaction.deferReply();
 
-    const target  = interaction.options.getMember('member');
-    const role    = interaction.options.getRole('role');
-    const note    = interaction.options.getString('note') || null;
-    const image   = interaction.options.getAttachment('image') || null;
+      const target  = interaction.options.getMember('member');
+      const newRole = interaction.options.getRole('new_role');
+      const oldRole = interaction.options.getRole('old_role') || null;
+      const note    = interaction.options.getString('note') || null;
+      const image   = interaction.options.getAttachment('image') || null;
 
-    if (!target) {
-      return interaction.editReply({ content: '❌ Could not find that member.' });
-    }
+      if (!target) return interaction.editReply({ content: 'Could not find that member in this server.' });
 
-    // Grant the new role
-    try {
-      await target.roles.add(role);
-    } catch (err) {
-      return interaction.editReply({
-        content: `❌ Failed to assign role: ${err.message}\nMake sure FSRP Management's role is above the target role.`,
-      });
-    }
+      // Role swap
+      try {
+        if (oldRole && target.roles.cache.has(oldRole.id)) await target.roles.remove(oldRole);
+        await target.roles.add(newRole);
+      } catch (e) {
+        return interaction.editReply({
+          content: 'Failed to assign role: ' + e.message + '. Make sure the bot role is above the target role.',
+        });
+      }
 
-    // Get Roblox username from verify-db
-    const verifyChannel = interaction.guild.channels.cache.get(config.channels.verifyDatabase);
-    let robloxUsername = 'Unknown';
-    if (verifyChannel) {
-      const { users } = await db.getVerifyDb(verifyChannel);
-      const entry = users.find(u => u.discordId === target.id && u.status === 'active');
-      if (entry) robloxUsername = entry.robloxUsername;
-    }
+      // Roblox username lookup
+      let robloxName = 'Unknown';
+      try {
+        const verCh = interaction.guild.channels.cache.get(config.channels.verifyDatabase);
+        if (verCh) {
+          const { users } = await db.getVerifyDb(verCh);
+          const entry = users.find(u => u.discordId === target.id && u.status === 'active');
+          if (entry) robloxName = entry.robloxUsername;
+        }
+      } catch {}
 
-    // Build promotion embed
-    const embed = new EmbedBuilder()
-      .setColor(config.colors.gold)
-      .setTitle('🎖️  STAFF PROMOTION')
-      .setDescription(
-        `**Congratulations, ${target}!**\n\n` +
-        `You have been promoted to **${role.name}** in Florida State Roleplay.\n` +
-        (note ? `\n> ${note}` : '')
-      )
-      .addFields(
-        { name: '👤 Staff Member', value: `${target} (${target.user.tag})`, inline: true },
-        { name: '🎮 Roblox',       value: robloxUsername,                   inline: true },
-        { name: '🆙 New Role',     value: role.toString(),                  inline: true },
-        { name: '👑 Promoted By',  value: interaction.user.toString(),      inline: true },
-        { name: '📅 Date',         value: `<t:${Math.floor(Date.now()/1000)}:F>`, inline: true },
-      )
-      .setFooter({ text: 'FSRP Management • Florida State Roleplay — Staff Management' })
-      .setTimestamp();
+      const ts = Math.floor(Date.now() / 1000);
 
-    if (image) {
-      embed.setImage(image.url);
-    }
-
-    // Post in staff-promotion channel
-    const promoChannel = interaction.guild.channels.cache.get(config.channels.staffPromotion);
-    if (promoChannel) {
-      await promoChannel.send({ embeds: [embed] });
-    }
-
-    // Log to logs channel
-    const logsChannel = interaction.guild.channels.cache.get(config.channels.logs);
-    if (logsChannel) {
-      const logEmbed = new EmbedBuilder()
-        .setColor(config.colors.primary)
-        .setTitle('📋  Promotion Log')
-        .addFields(
-          { name: 'Member',    value: `${target} (${target.id})`,          inline: true },
-          { name: 'New Role',  value: role.name,                            inline: true },
-          { name: 'By',        value: `${interaction.user} (${interaction.user.id})`, inline: true }
+      // Promotion embed (posted publicly)
+      const promoEmbed = new EmbedBuilder()
+        .setColor(config.colors.gold)
+        .setTitle('Staff Promotion — Florida State Roleplay')
+        .setDescription(
+          'Congratulations, ' + target.toString() + '!\n\n' +
+          'You have been promoted to **' + newRole.name + '** in Florida State Roleplay.' +
+          (note ? ('\n\n> ' + note) : '')
         )
+        .addFields(
+          { name: 'Staff Member', value: target.toString() + ' (' + target.user.tag + ')', inline: true },
+          { name: 'Roblox',       value: robloxName,                                       inline: true },
+          { name: 'New Role',     value: newRole.toString(),                                inline: true },
+          { name: 'Promoted By',  value: interaction.user.toString(),                       inline: true },
+          { name: 'Date',         value: '<t:' + ts + ':F>',                                inline: true },
+        )
+        .setFooter({ text: 'FSRP Management — Florida State Roleplay' })
         .setTimestamp();
-      await logsChannel.send({ embeds: [logEmbed] });
-    }
 
-    await interaction.editReply({
-      content: `✅ **${target.displayName}** has been promoted to **${role.name}**!`,
-    });
-  },
-};
+      if (image) promoEmbed.setImage(image.url);
+
+      // Post in staff promotion channel
+      const promoCh = interaction.guild.channels.cache.get(config.channels.staffPromotion);
+      if (promoCh) await promoCh.send({ embeds: [promoEmbed] }).catch(() => {});
+
+      // DM the promoted member
+      let dmSent = false;
+      try {
+        const dmEmbed = new EmbedBuilder()
+          .setColor(config.colors.gold)
+          .setTitle('Congratulations! You have been promoted.')
+          .setDescription(
+            'You have been promoted to **' + newRole.name + '** in **Florida State Roleplay**.' +
+            (note ? ('\n\n> ' + note) : '') +
+            '\n\nYour new role has been applied. Continue upholding FSRP standards.'
+          )
+          .setFooter({ text: 'FSRP Management — Florida State Roleplay' })
+          .setTimestamp();
+        await target.user.send({ embeds: [dmEmbed] });
+        dmSent = true;
+      } catch {}
+
+      // Log
+      const logCh = interaction.guild.channels.cache.get(config.channels.logs);
+      if (logCh) {
+        await logCh.send({ embeds: [new EmbedBuilder()
+          .setColor(config.colors.success)
+          .setTitle('Promotion Log')
+          .addFields(
+            { name: 'Member', value: target.toString() + ' (' + target.id + ')', inline: true },
+            { name: 'New Role', value: newRole.name, inline: true },
+            { name: 'Old Role', value: oldRole ? oldRole.name : 'N/A', inline: true },
+            { name: 'By', value: interaction.user.toString(), inline: true },
+            { name: 'Note', value: note || 'None', inline: false },
+          )
+          .setTimestamp()
+        ] }).catch(() => {});
+      }
+
+      return interaction.editReply({
+        content: target.displayName + ' has been promoted to **' + newRole.name + '**!' + (dmSent ? '' : ' (DMs disabled — could not notify them)'),
+      });
+    },
+  };
+  
