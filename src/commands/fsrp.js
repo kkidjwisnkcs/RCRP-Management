@@ -1,41 +1,29 @@
-// /fsrp — Owner-only bot management & unified setup
-  const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+// fsrp.js — Owner/Management bot management
+  'use strict';
+
+  const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
   const config       = require('../config');
   const perms        = require('../utils/permissions');
   const dbScanner    = require('../modules/dbScanner');
-  const shiftCards   = require('../modules/shiftCards');
   const erlc         = require('../utils/erlc');
-  const embeds       = require('../utils/embeds');
-  const verification = require('../modules/verification');
-  const applications = require('../modules/applications');
+  const autoSetup    = require('../modules/autoSetup');
+  const serverBrain  = require('../modules/serverBrain');
 
   module.exports = {
     data: new SlashCommandBuilder()
       .setName('fsrp')
       .setDescription('FSRP Management bot commands (Owner/Management only).')
       .addSubcommand(sub => sub
-        .setName('index')
-        .setDescription('Force re-index all rules channels to update AI knowledge.')
-      )
-      .addSubcommand(sub => sub
         .setName('status')
-        .setDescription('Show bot status, ERLC cache, and system info.')
+        .setDescription('Show bot status, ERLC cache, and live system info.')
       )
       .addSubcommand(sub => sub
-        .setName('setup')
-        .setDescription('Post or re-post any bot panel in the correct channel.')
-        .addStringOption(opt => opt
-          .setName('panel')
-          .setDescription('Which panel to post')
-          .setRequired(true)
-          .addChoices(
-            { name: 'Verification Panel',      value: 'verify' },
-            { name: 'Staff Applications',      value: 'apps' },
-            { name: 'Self-Roles Panel',        value: 'selfroles' },
-            { name: 'Staff Review Panel',      value: 'review' },
-            { name: 'Shift Cards (re-init)',   value: 'shifts' },
-          )
-        )
+        .setName('refresh')
+        .setDescription('Force re-post and update all bot panels in their channels.')
+      )
+      .addSubcommand(sub => sub
+        .setName('index')
+        .setDescription('Force re-index all channels to update AI knowledge base.')
       ),
 
     async execute(interaction) {
@@ -45,91 +33,62 @@
 
       const sub = interaction.options.getSubcommand();
 
-      if (sub === 'index') {
-        await interaction.deferReply({ ephemeral: true });
-        await dbScanner.scan?.() || dbScanner.start?.(interaction.client);
-        const context = dbScanner.getServerContext();
-        return interaction.editReply({ content: 'Knowledge index updated! Context: **' + context.length.toLocaleString() + '** characters indexed.' });
-      }
-
+      // ── /fsrp status ──────────────────────────────────────────────────────
       if (sub === 'status') {
         await interaction.deferReply({ ephemeral: true });
         const snapshot    = erlc.getCachedSnapshot();
         const cacheAge    = erlc.getCacheAge();
         const context     = dbScanner.getServerContext();
-        const playerCount = snapshot?.players?.length ?? 'N/A';
+        const brainStats  = serverBrain.getBrainStats ? serverBrain.getBrainStats() : null;
+        const playerCount = snapshot ? snapshot.players.length : 'N/A';
+        const stale       = snapshot && snapshot._stale ? ' *(stale)*' : '';
+
+        const fields = [
+          { name: 'Bot Status',       value: '🟢 Online',                                             inline: true },
+          { name: 'ERLC Cache',       value: cacheAge >= 0 ? cacheAge + 's ago' + stale : 'N/A',      inline: true },
+          { name: 'Players In-Game',  value: String(playerCount),                                      inline: true },
+          { name: '911 Calls',        value: String(snapshot ? snapshot.emergencyCalls.length : 0),    inline: true },
+          { name: 'Mod Calls',        value: String(snapshot ? snapshot.modCalls.length : 0),          inline: true },
+          { name: 'AI Context',       value: context.length.toLocaleString() + ' chars',               inline: true },
+        ];
+
+        if (brainStats) {
+          fields.push(
+            { name: 'Brain Channels',  value: String(brainStats.channelCount  || 0), inline: true },
+            { name: 'Brain Members',   value: String(brainStats.memberCount   || 0), inline: true },
+            { name: 'Brain Facts',     value: String(brainStats.factCount     || 0), inline: true },
+          );
+        }
+
         const embed = new EmbedBuilder()
           .setColor(config.colors.primary)
-          .setTitle('FSRP Management System Status')
-          .addFields(
-            { name: '🟢 Bot Status',        value: 'Online',                                   inline: true },
-            { name: '📡 ERLC Cache Age',    value: cacheAge >= 0 ? (cacheAge + 's ago') : 'N/A', inline: true },
-            { name: '👥 Players In-Game',   value: String(playerCount),                         inline: true },
-            { name: '🚨 Active 911 Calls',  value: String(snapshot?.emergencyCalls?.length ?? 0), inline: true },
-            { name: '📞 Active Mod Calls',  value: String(snapshot?.modCalls?.length ?? 0),     inline: true },
-            { name: '📚 AI Context',        value: context.length.toLocaleString() + ' chars',  inline: true },
-            { name: '🚗 Vehicles In-Game',  value: String(snapshot?.vehicles?.length ?? 0),     inline: true },
-            { name: '⚙️ Architecture',      value: 'Discord-as-Database (zero-persistence)',    inline: false },
-          )
-          .setFooter({ text: 'FSRP Management — Florida State Roleplay' })
+          .setTitle('FSRP Management — System Status')
+          .addFields(fields)
+          .setFooter({ text: 'FSRP Management Bot — Florida State Roleplay' })
           .setTimestamp();
+
         return interaction.editReply({ embeds: [embed] });
       }
 
-      if (sub === 'setup') {
+      // ── /fsrp refresh ─────────────────────────────────────────────────────
+      if (sub === 'refresh') {
         await interaction.deferReply({ ephemeral: true });
-        const panel = interaction.options.getString('panel');
-        const guild = interaction.guild;
-        const client = interaction.client;
+        const start = Date.now();
+        await autoSetup.run(interaction.client, interaction.guild);
+        const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+        return interaction.editReply({
+          content: '✅ All panels refreshed in **' + elapsed + 's**. Every channel now has the latest embed.',
+        });
+      }
 
-        if (panel === 'verify') {
-          const ch = guild.channels.cache.find(c => c.isTextBased() && /^verify(?!.*(?:database|db))/i.test(c.name)) || interaction.channel;
-          await verification.postVerifyPanel(ch);
-          return interaction.editReply({ content: 'Verification panel posted in <#' + ch.id + '>.' });
-        }
-
-        if (panel === 'apps') {
-          const ch = guild.channels.cache.get(config.channels.staffApplications) || interaction.channel;
-          await applications.postApplicationPanel(ch);
-          return interaction.editReply({ content: 'Staff application panel posted in <#' + ch.id + '>.' });
-        }
-
-        if (panel === 'selfroles') {
-          const ch = guild.channels.cache.get(config.channels.selfRoles);
-          if (!ch) return interaction.editReply({ content: 'Self-roles channel not found (ID: ' + config.channels.selfRoles + ').' });
-
-          const { roles } = config;
-          const deptRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('selfrole:' + roles.leo).setLabel('LEO').setEmoji('🚓').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('selfrole:' + roles.fireDept).setLabel('Fire Dept').setEmoji('🚒').setStyle(ButtonStyle.Danger),
-            new ButtonBuilder().setCustomId('selfrole:' + roles.dot).setLabel('DOT').setEmoji('🚧').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('selfrole:' + roles.civilian).setLabel('Civilian').setEmoji('🚲').setStyle(ButtonStyle.Secondary),
-          );
-          const pingRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('selfrole:' + roles.sessionPing).setLabel('Session Pings').setEmoji('🔔').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId('selfrole:' + roles.giveawayPing).setLabel('Giveaway Pings').setEmoji('🎉').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId('selfrole:' + roles.mediaPing).setLabel('Media Pings').setEmoji('📸').setStyle(ButtonStyle.Success),
-          );
-          await ch.send({ embeds: [embeds.selfRolesPanel()], components: [deptRow, pingRow] });
-          return interaction.editReply({ content: 'Self-roles panel posted in <#' + ch.id + '>.' });
-        }
-
-        if (panel === 'review') {
-          const ch = guild.channels.cache.get(config.channels.staffReview);
-          if (!ch) return interaction.editReply({ content: 'Staff review channel not found (ID: ' + config.channels.staffReview + ').' });
-          const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('leave_review').setLabel('⭐ Leave a Review').setStyle(ButtonStyle.Primary)
-          );
-          await ch.send({ embeds: [embeds.reviewPanel()], components: [row] });
-          return interaction.editReply({ content: 'Staff review panel posted in <#' + ch.id + '>.' });
-        }
-
-        if (panel === 'shifts') {
-          await shiftCards.init(client);
-          return interaction.editReply({ content: 'Shift cards reset. Live cards will appear in <#' + config.channels.shiftCards + '> as staff join the game.' });
-        }
-
-        return interaction.editReply({ content: 'Unknown panel option.' });
+      // ── /fsrp index ───────────────────────────────────────────────────────
+      if (sub === 'index') {
+        await interaction.deferReply({ ephemeral: true });
+        await dbScanner.scan ? dbScanner.scan() : dbScanner.start(interaction.client);
+        const context = dbScanner.getServerContext();
+        return interaction.editReply({
+          content: '✅ Knowledge index updated. **' + context.length.toLocaleString() + '** characters indexed across all channels.',
+        });
       }
     },
   };
